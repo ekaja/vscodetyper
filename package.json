@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "fetch-code": "node --experimental-strip-types scripts/fetch-code.ts"
   },
   "devDependencies": {
     "typescript": "~6.0.2",

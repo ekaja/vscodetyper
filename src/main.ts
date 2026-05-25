@@ -1,9 +1,8 @@
 import './style.css';
 import hljs from 'highlight.js';
-import { fetchRandomCodeFile, type CodeFile } from './github';
+import type { CodeFile } from './github';
 
 const CHARS_PER_KEYPRESS = 3;
-const PREFETCH_THRESHOLD = 1;
 const MAX_TABS = 8;
 
 interface Tab {
@@ -16,8 +15,8 @@ interface Tab {
 const state = {
   tabs: [] as Tab[],
   activeTabId: '',
-  queue: [] as CodeFile[],
-  isFetching: false,
+  pool: [] as CodeFile[],
+  usedIndices: new Set<number>(),
   tabCounter: 0,
   isReady: false,
 };
@@ -76,10 +75,7 @@ function highlightCode(code: string, filename: string): string {
 }
 
 function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function updateLineNumbers(text: string) {
@@ -94,14 +90,12 @@ function updateLineNumbers(text: string) {
     }
     lineNumbers.appendChild(frag);
   } else if (current > count) {
-    while (lineNumbers.children.length > count) {
-      lineNumbers.lastChild?.remove();
-    }
+    while (lineNumbers.children.length > count) lineNumbers.lastChild?.remove();
   }
 }
 
-function updateStatusBar(tab: Tab, charIndex: number) {
-  const text = tab.file.content.slice(0, charIndex);
+function updateStatusBar(tab: Tab) {
+  const text = tab.file.content.slice(0, tab.charIndex);
   const lines = text.split('\n');
   const ln = lines.length;
   const col = (lines[lines.length - 1] ?? '').length + 1;
@@ -124,7 +118,6 @@ function updateBreadcrumb(file: CodeFile) {
 function updateFileTree(tabs: Tab[], activeId: string) {
   const repoName = tabs[0]?.file.repo.split('/')[1]?.toUpperCase() ?? 'VSCODETYPER';
   repoFolderName.textContent = repoName;
-
   fileTree.innerHTML = '';
   const frag = document.createDocumentFragment();
   tabs.forEach(tab => {
@@ -140,27 +133,27 @@ function updateFileTree(tabs: Tab[], activeId: string) {
 function renderActiveTab() {
   const tab = state.tabs.find(t => t.id === state.activeTabId);
   if (!tab) return;
-
   const visibleText = tab.file.content.slice(0, tab.charIndex);
-  const highlighted = highlightCode(visibleText, tab.file.filename);
-  codeContent.innerHTML = highlighted;
-
+  codeContent.innerHTML = highlightCode(visibleText, tab.file.filename);
   updateLineNumbers(visibleText);
-  updateStatusBar(tab, tab.charIndex);
+  updateStatusBar(tab);
   updateBreadcrumb(tab.file);
-
-  scrollToBottom();
-}
-
-function scrollToBottom() {
   codeScrollArea.scrollTop = codeScrollArea.scrollHeight;
   lineNumbers.scrollTop = codeScrollArea.scrollTop;
+}
+
+function pickRandomFile(): CodeFile {
+  if (state.usedIndices.size >= state.pool.length) state.usedIndices.clear();
+  let idx: number;
+  do { idx = Math.floor(Math.random() * state.pool.length); }
+  while (state.usedIndices.has(idx));
+  state.usedIndices.add(idx);
+  return state.pool[idx];
 }
 
 function createTab(file: CodeFile): Tab {
   state.tabCounter++;
   const id = `tab-${state.tabCounter}`;
-
   const el = document.createElement('div');
   el.className = 'tab';
   el.dataset.tabId = id;
@@ -170,14 +163,10 @@ function createTab(file: CodeFile): Tab {
     <span class="tab-close">×</span>
   `;
   el.addEventListener('click', (e) => {
-    if ((e.target as HTMLElement).classList.contains('tab-close')) {
-      closeTab(id);
-    } else {
-      switchTab(id);
-    }
+    if ((e.target as HTMLElement).classList.contains('tab-close')) closeTab(id);
+    else switchTab(id);
   });
   tabsContainer.appendChild(el);
-
   const tab: Tab = { id, file, charIndex: 0, element: el };
   state.tabs.push(tab);
   return tab;
@@ -198,7 +187,6 @@ function closeTab(id: string) {
   if (idx === -1) return;
   state.tabs[idx].element.remove();
   state.tabs.splice(idx, 1);
-
   if (state.activeTabId === id) {
     const next = state.tabs[Math.min(idx, state.tabs.length - 1)];
     if (next) switchTab(next.id);
@@ -211,106 +199,59 @@ function closeTab(id: string) {
   updateFileTree(state.tabs, state.activeTabId);
 }
 
-async function openNextFile() {
-  if (state.queue.length === 0) return;
-  const file = state.queue.shift()!;
-
-  if (state.tabs.length >= MAX_TABS) {
-    closeTab(state.tabs[0].id);
-  }
-
+function openNextFile() {
+  if (state.tabs.length >= MAX_TABS) closeTab(state.tabs[0].id);
+  const file = pickRandomFile();
   const tab = createTab(file);
   switchTab(tab.id);
   updateFileTree(state.tabs, tab.id);
-  prefetchIfNeeded();
-}
-
-async function prefetchIfNeeded() {
-  if (state.isFetching) return;
-  if (state.queue.length >= PREFETCH_THRESHOLD + 1) return;
-
-  state.isFetching = true;
-  while (state.queue.length < PREFETCH_THRESHOLD + 2) {
-    try {
-      const file = await fetchRandomCodeFile();
-      if (file) state.queue.push(file);
-    } catch {
-      // ignore individual failures
-    }
-  }
-  state.isFetching = false;
 }
 
 function handleKeyPress() {
   const tab = state.tabs.find(t => t.id === state.activeTabId);
   if (!tab) return;
 
-  const remaining = tab.file.content.length - tab.charIndex;
-  if (remaining <= 0) {
+  if (tab.charIndex >= tab.file.content.length) {
     openNextFile();
     return;
   }
 
-  const advance = Math.min(CHARS_PER_KEYPRESS, remaining);
-  tab.charIndex += advance;
-
-  if (tab.charIndex >= tab.file.content.length) {
-    tab.charIndex = tab.file.content.length;
-  }
-
+  tab.charIndex = Math.min(tab.charIndex + CHARS_PER_KEYPRESS, tab.file.content.length);
   renderActiveTab();
-
-  if (state.queue.length <= PREFETCH_THRESHOLD) {
-    prefetchIfNeeded();
-  }
 }
 
 async function init() {
-  loadingText.textContent = 'Fetching code from GitHub...';
-
-  let file: CodeFile | null = null;
-  let attempts = 0;
-  while (!file && attempts < 5) {
-    attempts++;
-    try {
-      file = await fetchRandomCodeFile();
-    } catch {
-      loadingText.textContent = `Retrying... (${attempts}/5)`;
-    }
-  }
-
-  if (!file) {
-    loadingText.textContent = 'Failed to fetch code. Check your connection.';
+  loadingText.textContent = 'Loading code pool...';
+  try {
+    const res = await fetch('/code-pool.json');
+    if (!res.ok) throw new Error('code-pool.json not found');
+    const data = await res.json() as { files: CodeFile[]; generatedAt: string };
+    state.pool = data.files;
+    console.log(`Loaded ${state.pool.length} files (generated: ${data.generatedAt})`);
+  } catch (e) {
+    loadingText.textContent = 'code-pool.json not found. Run: npm run fetch-code';
+    console.error(e);
     return;
   }
 
   loadingOverlay.classList.add('hidden');
   state.isReady = true;
-
-  const tab = createTab(file);
-  switchTab(tab.id);
-  updateFileTree(state.tabs, tab.id);
-
-  prefetchIfNeeded();
+  openNextFile();
 }
 
 document.addEventListener('keydown', (e) => {
   if (!state.isReady) return;
   if (e.key === 'F11') {
     e.preventDefault();
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen();
-    } else {
-      document.exitFullscreen();
-    }
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+    else document.exitFullscreen();
     return;
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (['F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F12'].includes(e.key)) return;
-  if (['Tab', 'Escape', 'CapsLock', 'ScrollLock', 'Pause', 'Insert',
-       'Home', 'End', 'PageUp', 'PageDown', 'ArrowUp', 'ArrowDown',
-       'ArrowLeft', 'ArrowRight', 'PrintScreen', 'NumLock'].includes(e.key)) return;
-
+  if (/^F\d+$/.test(e.key)) return;
+  if (['Tab','Escape','CapsLock','ScrollLock','Pause','Insert',
+       'Home','End','PageUp','PageDown','ArrowUp','ArrowDown',
+       'ArrowLeft','ArrowRight','PrintScreen','NumLock'].includes(e.key)) return;
   e.preventDefault();
   handleKeyPress();
 });
