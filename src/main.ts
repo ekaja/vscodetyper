@@ -226,12 +226,16 @@ function formatCount(n: number): string {
   return String(n);
 }
 
-function trackVisit() {
+async function trackVisit() {
   const el = document.getElementById('visitor-count');
   if (!el) return;
-  const count = (parseInt(localStorage.getItem('vscodetyper-visits') ?? '0', 10) || 0) + 1;
-  localStorage.setItem('vscodetyper-visits', String(count));
-  el.textContent = formatCount(count);
+  try {
+    const res = await fetch('/api/count');
+    const { count } = await res.json() as { count: number };
+    el.textContent = formatCount(count);
+  } catch {
+    el.textContent = '–';
+  }
 }
 
 async function init() {
