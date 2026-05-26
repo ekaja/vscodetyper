@@ -220,6 +220,24 @@ function handleKeyPress() {
   renderActiveTab();
 }
 
+function formatCount(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
+  return String(n);
+}
+
+async function fetchVisitorCount() {
+  const el = document.getElementById('visitor-count');
+  if (!el) return;
+  try {
+    const res = await fetch('https://api.countapi.xyz/hit/vscodetyper.gumairu.com/visits');
+    const data = await res.json() as { value: number };
+    el.textContent = formatCount(data.value);
+  } catch {
+    el.textContent = '–';
+  }
+}
+
 async function init() {
   loadingText.textContent = 'Loading code pool...';
   try {
@@ -237,6 +255,7 @@ async function init() {
   loadingOverlay.classList.add('hidden');
   state.isReady = true;
   openNextFile();
+  fetchVisitorCount();
 }
 
 document.addEventListener('keydown', (e) => {
