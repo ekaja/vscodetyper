@@ -226,16 +226,12 @@ function formatCount(n: number): string {
   return String(n);
 }
 
-async function fetchVisitorCount() {
+function trackVisit() {
   const el = document.getElementById('visitor-count');
   if (!el) return;
-  try {
-    const res = await fetch('https://api.countapi.xyz/hit/vscodetyper.gumairu.com/visits');
-    const data = await res.json() as { value: number };
-    el.textContent = formatCount(data.value);
-  } catch {
-    el.textContent = '–';
-  }
+  const count = (parseInt(localStorage.getItem('vscodetyper-visits') ?? '0', 10) || 0) + 1;
+  localStorage.setItem('vscodetyper-visits', String(count));
+  el.textContent = formatCount(count);
 }
 
 async function init() {
@@ -255,7 +251,7 @@ async function init() {
   loadingOverlay.classList.add('hidden');
   state.isReady = true;
   openNextFile();
-  fetchVisitorCount();
+  trackVisit();
 }
 
 document.addEventListener('keydown', (e) => {
