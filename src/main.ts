@@ -230,7 +230,7 @@ async function trackVisit() {
   const el = document.getElementById('visitor-count');
   if (!el) return;
   try {
-    const res = await fetch('https://countapi.mileshilliard.com/hit/vscodetyper.gumairu.com/visits');
+    const res = await fetch('https://countapi.mileshilliard.com/api/v1/hit/vscodetyper');
     const { value } = await res.json() as { value: number };
     el.textContent = formatCount(value);
   } catch {
